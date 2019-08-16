@@ -6,13 +6,20 @@ The repo-archive program downloads a number of Git repos then pushes them to a S
 
 Configure:
 ```
-# in ~/.repo_archive.toml
-s3_bucket = "repo-archive.example.com"
-s3_region = "us-west-1"
-repos = [
-  "repo_id_1:git@github.com:https://github.com/jlcheng/monorepo",
-  "repo_id_2:git@github.com:git@github.com:example/foobar.git",
-]
+# in $HOME/.repo_archive.toml
+[aws]
+s3_bucket = "repo-archive.foo.bucket"
+s3_region = "us-west-2"
+
+[[repo]]
+ID = "repo_1"
+url = "https://github.com/example/repo1.git"
+access_id = "user_name"
+access_key = "foobar"
+
+[[repo]]
+ID = "repo_2"
+url = "git://bitbucket.org/example/org.git"
 ```
 
 Run

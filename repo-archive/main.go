@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"gopkg.in/src-d/go-git.v4"
+	"gopkg.in/src-d/go-git.v4/plumbing/transport/http"
 	"io"
 	"io/ioutil"
 	"log"
@@ -29,9 +30,23 @@ type UploadParams struct {
 }
 
 type Remote struct {
-	ID  string
-	url string
+	ID        string
+	Url       string
+	AccessID  string `mapstructure:"access_id"`
+	AccessKey string `mapstructure:"access_key"`
 }
+
+type AWSConfig struct {
+	S3Bucket string `mapstructure:"s3_bucket"`
+	S3Region string `mapstructure:"s3_region"`
+}
+
+type Config struct {
+	AWSConfig AWSConfig `mapstructure:"aws"`
+	Remotes   []Remote  `mapstructure:"repo"`
+}
+
+var config Config
 
 func main() {
 	var configFile string
@@ -41,41 +56,44 @@ func main() {
 		// Use config file from the flag.
 		viper.SetConfigFile(configFile)
 	} else {
-		// Find home directory.
+		// Otherwise, use $HOME/.repo_archive.toml
 		home, err := os.UserHomeDir()
 		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			log.Fatal(err)
 		}
-
-		// Search config in home directory with name ".grs" (without extension).
-		viper.AddConfigPath(home)
 		viper.SetConfigName(".repo_archive")
+		viper.AddConfigPath(home)
+		viper.SetConfigType("toml")
 	}
 	if err := viper.ReadInConfig(); err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 	} else {
-		fmt.Println("Using config file:", viper.ConfigFileUsed())
+		log.Println("Using config file:", viper.ConfigFileUsed())
 	}
 
 	run()
 }
 
 func run() {
+	err := viper.Unmarshal(&config)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	session := session.Must(session.NewSessionWithOptions(session.Options{
 		Config: aws.Config{
-			Region: aws.String(parseS3Region()),
+			Region: aws.String(config.AWSConfig.S3Region),
 		},
 	}))
 
 	uploadParams := UploadParams{
 		Uploader:  s3manager.NewUploader(session),
-		S3Bucket:  parseS3Bucket(),
+		S3Bucket:  config.AWSConfig.S3Bucket,
 		Suffix:    dateStr(),
 		WaitGroup: new(sync.WaitGroup),
 	}
 
-	remotes := parseRemotes()
+	remotes := config.Remotes
 	uploadParams.WaitGroup.Add(len(remotes))
 	for _, remote := range remotes {
 		go func(remote Remote) {
@@ -85,35 +103,6 @@ func run() {
 		}(remote)
 	}
 	uploadParams.WaitGroup.Wait()
-}
-
-func parseRemotes() []Remote {
-	repos := viper.GetStringSlice("repos")
-	remotes := make([]Remote, len(repos))
-	for i, elem := range repos {
-		id_url := strings.SplitN(elem, ":", 2)
-		remotes[i] = Remote{ID: id_url[0], url: id_url[1]}
-	}
-	if len(remotes) == 0 {
-		log.Fatal("repositories not specified")
-	}
-	return remotes
-}
-
-func parseS3Bucket() string {
-	s3 := viper.GetString("s3_bucket")
-	if s3 == "" {
-		log.Fatal("s3_bucket not specifeid")
-	}
-	return s3
-}
-
-func parseS3Region() string {
-	region := viper.GetString("s3_region")
-	if region == "" {
-		log.Fatal("s3_region not specified")
-	}
-	return region
 }
 
 func dateStr() string {
@@ -127,6 +116,7 @@ func mkS3Path(remoteId, suffix string) string {
 
 func cloneAndUpload(remote Remote, uploadParams UploadParams) error {
 	defer uploadParams.WaitGroup.Done()
+
 	tmpDir, err := ioutil.TempDir("", "repo_archive_"+remote.ID)
 	if err != nil {
 		return err
@@ -135,11 +125,19 @@ func cloneAndUpload(remote Remote, uploadParams UploadParams) error {
 
 	log.Println("cloning", remote.ID)
 	coDir := fmt.Sprintf("%s/%s", tmpDir, remote.ID)
+	options := &git.CloneOptions{URL: remote.Url}
+	if remote.AccessID != "" {
+		options.Auth = &http.BasicAuth{
+			Username: remote.AccessID,
+			Password: remote.AccessKey,
+		}
+	}
+
 	_, err = git.PlainClone(coDir,
 		false,
-		&git.CloneOptions{URL: remote.url})
+		options)
 	if err != nil {
-		log.Println("error cloning", err, remote.url)
+		log.Println("error cloning", err, remote.Url)
 		return err
 	}
 
