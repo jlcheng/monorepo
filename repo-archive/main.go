@@ -22,11 +22,10 @@ import (
 )
 
 type UploadParams struct {
-	Session   *session.Session
+	Uploader  *s3manager.Uploader
 	S3Bucket  string
 	Suffix    string
 	WaitGroup *sync.WaitGroup
-	Errors    chan error
 }
 
 type Remote struct {
@@ -63,25 +62,24 @@ func main() {
 }
 
 func run() {
-	remotes := parseRemotes()
-	s3 := parseS3Bucket()
+	session := session.Must(session.NewSessionWithOptions(session.Options{
+		Config: aws.Config{
+			Region: aws.String(parseS3Region()),
+		},
+	}))
 
 	uploadParams := UploadParams{
-		Session: session.Must(session.NewSessionWithOptions(session.Options{
-			Config: aws.Config{
-				Region: aws.String(viper.GetString("s3_region")),
-			},
-		})),
-		S3Bucket:  s3,
+		Uploader:  s3manager.NewUploader(session),
+		S3Bucket:  parseS3Bucket(),
 		Suffix:    dateStr(),
 		WaitGroup: new(sync.WaitGroup),
 	}
 
+	remotes := parseRemotes()
 	uploadParams.WaitGroup.Add(len(remotes))
 	for _, remote := range remotes {
 		go func(remote Remote) {
-			err := cloneAndUpload(remote, uploadParams)
-			if err != nil {
+			if err := cloneAndUpload(remote, uploadParams); err != nil {
 				log.Println(err)
 			}
 		}(remote)
@@ -136,7 +134,7 @@ func cloneAndUpload(remote Remote, uploadParams UploadParams) error {
 	defer os.RemoveAll(tmpDir)
 
 	log.Println("cloning", remote.ID)
-	coDir := tmpDir + "/" + remote.ID
+	coDir := fmt.Sprintf("%s/%s", tmpDir, remote.ID)
 	_, err = git.PlainClone(coDir,
 		false,
 		&git.CloneOptions{URL: remote.url})
@@ -145,18 +143,17 @@ func cloneAndUpload(remote Remote, uploadParams UploadParams) error {
 		return err
 	}
 
-	tf := tmpDir + "/" + remote.ID + ".tgz"
+	tf := fmt.Sprintf("%s/%s.tgz", tmpDir, remote.ID)
 	if err = mktarball(coDir, tf); err != nil {
 		return err
 	}
 
 	log.Println("tarball created at", tf)
-	return uploadSingleS3(tf, uploadParams.S3Bucket, mkS3Path(remote.ID, uploadParams.Suffix), uploadParams.Session)
+	return uploadSingleS3(tf, uploadParams.S3Bucket, mkS3Path(remote.ID, uploadParams.Suffix), uploadParams.Uploader)
 }
 
-func uploadSingleS3(local, bucket, remote string, session *session.Session) error {
+func uploadSingleS3(local, bucket, remote string, uploader *s3manager.Uploader) error {
 	log.Println("uploading", local)
-	uploader := s3manager.NewUploader(session)
 	f, err := os.Open(local)
 	if err != nil {
 		return err
@@ -172,7 +169,7 @@ func uploadSingleS3(local, bucket, remote string, session *session.Session) erro
 	if err != nil {
 		return err
 	}
-	log.Println("uploaded to ", result.Location)
+	log.Println("uploaded to", result.Location)
 
 	return nil
 }
@@ -234,11 +231,4 @@ func writeFile(from string, w io.Writer) error {
 	_, err = io.Copy(w, r)
 	r.Close()
 	return err
-}
-
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
-
-	// If a config file is found, read it in.
-
 }
