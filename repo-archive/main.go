@@ -106,7 +106,7 @@ func run() {
 }
 
 func dateStr() string {
-	layout := "20060102"
+	layout := "200601"
 	return time.Now().Format(layout)
 }
 
