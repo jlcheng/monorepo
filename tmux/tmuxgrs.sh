@@ -21,6 +21,8 @@ if [ "$ok" != "0" ]; then
     tmux resize-pane -D 20
     tmux select-pane -t 0
 
+    tmux new-window -n "bash"
+
     tmux select-window -t $SESSION:1
     tmux -2 attach-session -d -t $SESSION
 else
