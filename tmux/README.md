@@ -1,5 +1,5 @@
 Wrapper around Tmux
 ===================
 
-Utilitiy [sic] around tmux.
+Scripts for tmux sessions
 
