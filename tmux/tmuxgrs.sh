@@ -9,6 +9,7 @@ LOG_FILE="$HOME/tmp/grs.log"
 tmux has-session -t $SESSION
 ok="$?"
 if [ "$ok" != "0" ]; then
+    
     tmux -2 new-session -d -s $SESSION
 
     tmux select-window -t $SESSION:1 -n 'Grs'
@@ -24,7 +25,5 @@ if [ "$ok" != "0" ]; then
     tmux new-window -n "bash"
 
     tmux select-window -t $SESSION:1
-    tmux -2 attach-session -d -t $SESSION
-else
-    tmux -2 attach-session -d -t $SESSION
 fi
+tmux attach-session -d -t $SESSION
